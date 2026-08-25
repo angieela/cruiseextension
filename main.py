@@ -1,144 +1,183 @@
-from fastapi import FastAPI
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey
-from sqlalchemy.orm import declarative_base, sessionmaker
-from datetime import datetime
+from datetime import date
 
-app = FastAPI()
+from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy.orm import Session
 
-# 1. Create/connect to SQLite database file
-DATABASE_URL = "sqlite:///./cruises.db"
-
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}
-)
-
-SessionLocal = sessionmaker(bind=engine)
-
-Base = declarative_base()
+from database import SessionLocal, engine
+from models import Base, Cruise, PriceHistory
 
 
-# 2. Define cruises table
-class Cruise(Base):
-    __tablename__ = "cruises"
+app = FastAPI(title="Cruise Price Tracker API")
 
-    id = Column(Integer, primary_key=True, index=True)
-    ship = Column(String)
-    destination = Column(String)
-    departure_date = Column(DateTime)
-    sourcesite = Column(String)
-    external_id = Column(Integer, primary_key=True, index=True)
-    #specifics
-    room_type = "interior"
-
-# 3. Define price_history table
-class PriceHistory(Base):
-    __tablename__ = "price_history"
-
-    id = Column(Integer, primary_key=True, index=True)
-    price = Column(Float)
-    scraped_at = Column(DateTime)
+MINIMUM_SCRAPE_DAYS = 5
 
 
-# 4. Actually create the tables in cruises.db
+def get_price_rating(discount_percent: float):
+    """Return the MVP label and emoji for a percent below/above average."""
+    if discount_percent >= 30:
+        return "Really Great Deal", "🤩"
+    if discount_percent >= 20:
+        return "Great Deal", "🔥"
+    if discount_percent >= 5:
+        return "Good Deal", "👍"
+    if discount_percent >= -5:
+        return "Okay", "😐"
+    if discount_percent >= -20:
+        return "Not the Best", "👎"
+    if discount_percent >= -30:
+        return "Expensive", "💸"
+    return "Really Expensive", "🚨"
+
+# Both the API and scraper use the models and engine shared above.
 Base.metadata.create_all(bind=engine)
 
 
-# 5. Helper function to get database session
 def get_db():
     db = SessionLocal()
     try:
-        return db
+        yield db
     finally:
-        pass
+        db.close()
 
 
-# 6. Home route
 @app.get("/")
 def home():
-    return {"message": "Cruise API with database is running"}
+    return {
+        "message": "Cruise API with shared database is running",
+        "database": engine.dialect.name,
+    }
 
 
-# 7. Insert fake data route
 @app.post("/seed-data")
-def seed_data():
-    db = get_db()
-
-    existing_cruise = db.query(Cruise).filter(Cruise.id == 1).first()
-
-    if existing_cruise:
-        db.close()
-        return {"message": "Data already exists"}
-
-    cruise = Cruise(
-        id=1,
-        ship="Wonder of the Seas",
-        destination="Caribbean"
+def seed_data(db: Session = Depends(get_db)):
+    cruise = (
+        db.query(Cruise)
+        .filter_by(package_code="DEMO-WN-001", ship_code="WN", year=2027)
+        .one_or_none()
     )
 
-    db.add(cruise)
+    if cruise is None:
+        cruise = Cruise(
+            package_code="DEMO-WN-001",
+            ship_code="WN",
+            year=2027,
+        )
+        db.add(cruise)
 
-    prices = [
-        PriceHistory(cruise_id=1, price=1200, scraped_at=datetime(2026, 6, 1)),
-        PriceHistory(cruise_id=1, price=1150, scraped_at=datetime(2026, 6, 10)),
-        PriceHistory(cruise_id=1, price=999, scraped_at=datetime(2026, 6, 22)),
+    cruise.ship_name = "Wonder of the Seas"
+    cruise.itinerary_name = "Demo Caribbean Cruise"
+    cruise.length = "7 nights"
+    cruise.departure_port = "Miami, Florida"
+    cruise.ports = "Nassau, Perfect Day at CocoCay"
+    db.flush()
+
+    sailing_date_range = "Jan 30 - Feb 6, 2027"
+    seeded_prices = [
+        (date(2026, 6, 1), 1200.0),
+        (date(2026, 6, 10), 1150.0),
+        (date(2026, 6, 22), 999.0),
+        (date(2026, 6, 23), 1100.0),
+        (date(2026, 6, 24), 900.0),
     ]
 
-    db.add_all(prices)
+    for scrape_date, price in seeded_prices:
+        price_history = (
+            db.query(PriceHistory)
+            .filter_by(
+                cruise_id=cruise.id,
+                sailing_date_range=sailing_date_range,
+                year=cruise.year,
+                date_scraped=scrape_date,
+            )
+            .one_or_none()
+        )
+        if price_history is None:
+            price_history = PriceHistory(
+                cruise_id=cruise.id,
+                ship_code=cruise.ship_code,
+                sailing_date_range=sailing_date_range,
+                year=cruise.year,
+                date_scraped=scrape_date,
+                price=price,
+            )
+            db.add(price_history)
+        else:
+            price_history.price = price
+
     db.commit()
-    db.close()
 
-    return {"message": "Fake cruise data inserted"}
+    return {
+        "message": "Demo cruise data seeded",
+        "cruise_id": cruise.id,
+        "sailing_date_range": sailing_date_range,
+        "year": cruise.year,
+        "scrape_days": len(seeded_prices),
+    }
 
 
-# 8. Cruise score route
 @app.get("/cruise-score/{cruise_id}")
-def get_cruise_score(cruise_id: int):
-    db = get_db()
-
-    cruise = db.query(Cruise).filter(Cruise.id == cruise_id).first()
-
+def get_cruise_score(
+    cruise_id: int,
+    sailing_date_range: str,
+    year: int,
+    db: Session = Depends(get_db),
+):
+    cruise = db.query(Cruise).filter(Cruise.id == cruise_id).one_or_none()
     if cruise is None:
-        db.close()
-        return {"error": "Cruise not found"}
+        raise HTTPException(status_code=404, detail="Cruise not found")
 
     price_rows = (
         db.query(PriceHistory)
-        .filter(PriceHistory.cruise_id == cruise_id)
-        .order_by(PriceHistory.scraped_at)
+        .filter(
+            PriceHistory.cruise_id == cruise.id,
+            PriceHistory.sailing_date_range == sailing_date_range,
+            PriceHistory.year == year,
+        )
+        .order_by(PriceHistory.date_scraped)
         .all()
     )
+    if not price_rows:
+        raise HTTPException(status_code=404, detail="No price history found")
 
-    if len(price_rows) == 0:
-        db.close()
-        return {"error": "No price history found"}
+    distinct_scrape_days = {row.date_scraped for row in price_rows}
+    latest_price_row = max(price_rows, key=lambda row: row.date_scraped)
+    if len(distinct_scrape_days) < MINIMUM_SCRAPE_DAYS:
+        days_remaining = MINIMUM_SCRAPE_DAYS - len(distinct_scrape_days)
+        day_word = "day" if days_remaining == 1 else "days"
+        return {
+            "status": "not_enough_history",
+            "cruise_id": cruise_id,
+            "year": year,
+            "sailing_date_range": sailing_date_range,
+            "current_price": latest_price_row.price,
+            "days_collected": len(distinct_scrape_days),
+            "days_remaining": days_remaining,
+            "message": (
+                "Posting is too recent, "
+                f"come again in {days_remaining} {day_word}!"
+            ),
+        }
 
     prices = [row.price for row in price_rows]
-
-    current_price = prices[-1]
+    current_price = latest_price_row.price
     average_price = sum(prices) / len(prices)
+    if average_price <= 0:
+        raise HTTPException(status_code=422, detail="Average price must be positive")
 
     discount_percent = ((average_price - current_price) / average_price) * 100
-
-    if discount_percent >= 15:
-        label = "Great Deal"
-        score = 90
-    elif discount_percent >= 5:
-        label = "Okay Deal"
-        score = 70
-    else:
-        label = "Wait"
-        score = 50
-
-    db.close()
+    label, emoji = get_price_rating(discount_percent)
 
     return {
+        "status": "rated",
         "cruise_id": cruise_id,
-        "ship": cruise.ship,
-        "destination": cruise.destination,
+        "year": year,
+        "sailing_date_range": sailing_date_range,
+        "ship": cruise.ship_name,
+        "destination": cruise.itinerary_name,
         "current_price": current_price,
         "average_price": round(average_price, 2),
         "discount_percent": round(discount_percent, 2),
-        "score": score,
-        "label": label
+        "signed_percentage": f"{discount_percent:+.2f}%",
+        "label": label,
+        "emoji": emoji,
     }

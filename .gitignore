@@ -1,0 +1,11 @@
+.venv*/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+royal_caribbean_cruises.csv
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.db.backup

@@ -3,9 +3,16 @@
     "name": "Cruise Extension",
     "version": "1.0", 
     "description": "This is a basic demo extension that creates label into fake cruise listings",
+    "host_permissions": [
+        "https://www.royalcaribbean.com/*",
+        "https://royalcaribbean.com/*"
+    ],
     "content_scripts": [
         {
-            "matches": ["<all_urls>"],
+            "matches": [
+                "https://www.royalcaribbean.com/*",
+                "https://royalcaribbean.com/*"
+            ],
             "js": ["content.js"]
         }
     ]

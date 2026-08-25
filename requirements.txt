@@ -1,0 +1,6 @@
+fastapi
+playwright
+psycopg[binary]
+python-dotenv
+SQLAlchemy
+uvicorn[standard]

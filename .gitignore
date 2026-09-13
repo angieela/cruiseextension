@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
-royal_caribbean_cruises.csv
+royal_caribbean*_cruises.csv
 *.db
 *.db-journal
 *.db-shm

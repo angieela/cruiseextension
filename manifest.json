@@ -1,11 +1,12 @@
 { 
     "manifest_version": 3,
-    "name": "Cruise Extension",
+    "name": "Royal Caribbean Cruise Price Tracker",
     "version": "1.0", 
-    "description": "This is a basic demo extension that creates label into fake cruise listings",
+    "description": "Adds cruise price-history ratings to Royal Caribbean listings.",
     "host_permissions": [
         "https://www.royalcaribbean.com/*",
-        "https://royalcaribbean.com/*"
+        "https://royalcaribbean.com/*",
+        "http://127.0.0.1:8000/*"
     ],
     "content_scripts": [
         {

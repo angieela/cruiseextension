@@ -12,6 +12,13 @@ def parse_scrape_date(value):
 
 
 def save_scraped_rows(session, rows):
+    summary = {
+        "cruises_created": 0,
+        "inserted": 0,
+        "updated": 0,
+        "skipped": 0,
+    }
+
     try:
         for row in rows:
             price = parse_price(row.get("price"))
@@ -20,6 +27,7 @@ def save_scraped_rows(session, rows):
                     "Warning: skipping price-history row with invalid price "
                     f"{row.get('price')!r}"
                 )
+                summary["skipped"] += 1
                 continue
 
             package_code = row.get("package_code")
@@ -32,6 +40,7 @@ def save_scraped_rows(session, rows):
 
             if not package_code or not ship_code or not sailing_date_range or year is None:
                 print("Warning: skipping price-history row with missing identifiers")
+                summary["skipped"] += 1
                 continue
 
             cruise = (
@@ -47,6 +56,7 @@ def save_scraped_rows(session, rows):
                     year=year,
                 )
                 session.add(cruise)
+                summary["cruises_created"] += 1
 
             cruise.itinerary_name = row.get("itinerary_name")
             cruise.length = row.get("length")
@@ -77,18 +87,13 @@ def save_scraped_rows(session, rows):
                     price=price,
                 )
                 session.add(price_history)
-                action = "INSERT"
+                summary["inserted"] += 1
             else:
                 price_history.price = price
-                action = "UPDATE"
-
-            print(
-                f'DATABASE {action}: cruise_id={cruise.id}, year={year}, '
-                f'sailing_date_range="{sailing_date_range}", '
-                f"date_scraped={scrape_date}, price={price:g}"
-            )
+                summary["updated"] += 1
 
         session.commit()
+        return summary
     except Exception:
         session.rollback()
         raise

@@ -5,17 +5,18 @@ import csv
 import os
 
 from database import SessionLocal
-from price_utils import parse_price
+from date_utils import build_sailing_identifier, parse_starting_date
 from repository import save_scraped_rows
 
 all_cruises = []
 
-BASE_URL = "https://www.royalcaribbean.com/cruises?country=USA&currency=USD&ecid=ps_mdt_lfbrnd_goo_12397&gad_campaignid=10439537189&gad_source=1&gbraid=0AAAAADhYZLSyXY8IO7LBLRlV8Elp_Ct73&gclid=Cj0KCQjw39zSBhDhARIsANammDviOcDtqMCypfKfH2ZiYdIJFfAzIyOLuH7F2odzxKBsgwSpNV0KJHoaAu3mEALw_wcB&gclsrc=aw.ds&hp_search_widget=home&search=departurePort:BYE,FLL,GAL,LAX,MIA,PCN,SAN,SEA,TPA&sort=by:RECOMMENDED"
-CSV_FILE = "royal_caribbean_cruises.csv"
-YEAR_PATTERN = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
-SAILING_DATE_PATTERN = re.compile(
-    r"([A-Z][a-z]{2} \d{1,2} - [A-Z][a-z]{2} \d{1,2}(?:,? \d{4})?)"
+BASE_URL = (
+    "https://www.royalcaribbean.com/cruises"
+    "?country=USA&currency=USD"
+    "&destinationRegionCode_EUROP=true"
+    "&sort=by:RECOMMENDED"
 )
+CSV_FILE = "royal_caribbean_cruises.csv"
 
 
 def clean_text(text):
@@ -28,94 +29,35 @@ def safe_inner_text(locator):
     return clean_text(locator.first.inner_text())
 
 
-def parse_year(*values):
-    for value in values:
-        if value is None:
-            continue
-
-        match = YEAR_PATTERN.search(str(value))
-        if match:
-            return int(match.group(1))
-
-    return None
-
-
-def parse_starting_date(text):
+def parse_price(text):
     if not text:
         return None
 
-    match = re.search(r"valid for ([A-Za-z]{3} \d{1,2}, \d{4})", text)
-    return match.group(1) if match else None
+    match = re.search(r"\$\s*([\d,]+)", text)
+    return f"${match.group(1)}" if match else None
 
 
-def parse_available_dates(page, departure_date=None):
-    sailing_section = page.locator('[data-testid="sailing-dates-section"]')
-    if sailing_section.count() == 0:
+def parse_available_dates(page):
+    body_text = page.locator("body").inner_text()
+
+    marker = re.search(r"\d+\s+Available dates", body_text)
+    if not marker:
         return []
 
-    sailing_groups = sailing_section.first.evaluate(
-        """
-        section => {
-            const groupedItems = new Set();
-            const grouped = [];
+    dates_text = body_text[marker.end():]
 
-            section.querySelectorAll('[data-testid^="year-label-"]').forEach(label => {
-                const yearGroup = label.parentElement;
-                if (!yearGroup) return;
-
-                yearGroup.querySelectorAll('[data-testid="sailing-date-item"]').forEach(item => {
-                    groupedItems.add(item);
-                    grouped.push({
-                        yearText: label.textContent || "",
-                        itemText: item.innerText || item.textContent || "",
-                    });
-                });
-            });
-
-            const ungrouped = Array.from(
-                section.querySelectorAll('[data-testid="sailing-date-item"]')
-            )
-                .filter(item => !groupedItems.has(item))
-                .map(item => ({
-                    yearText: "",
-                    itemText: item.innerText || item.textContent || "",
-                }));
-
-            return [...grouped, ...ungrouped];
-        }
-        """
+    date_price_pairs = re.findall(
+        r"([A-Z][a-z]{2} \d{1,2} - [A-Z][a-z]{2} \d{1,2})\s*\n\s*(\$\d[\d,]*)",
+        dates_text,
     )
 
-    available_dates = []
-    for sailing in sailing_groups:
-        item_text = clean_text(sailing.get("itemText"))
-        date_match = SAILING_DATE_PATTERN.search(item_text or "")
-        date_range = date_match.group(1) if date_match else None
-        price = parse_price(item_text)
-
-        if not date_range:
-            print(f"Warning: skipping invalid sailing date item {item_text!r}")
-            continue
-        if price is None:
-            print(f"Warning: skipping invalid price in {item_text!r} for {date_range}")
-            continue
-
-        year = parse_year(sailing.get("yearText"), date_range, departure_date)
-        if year is None:
-            print(f"Warning: skipping sailing with no year: {date_range}")
-            continue
-
-        print(
-            f'SCRAPED: year={year}, sailing_date_range="{date_range}", '
-            f"price={price:g}"
-        )
-        available_dates.append({
+    return [
+        {
             "sailing_date_range": date_range,
-            "year": year,
             "price": price,
-        })
-
-    return available_dates
+        }
+        for date_range, price in date_price_pairs
+    ]
 
 def parse_departure_port_from_card_text(card_text):
     match = re.search(r"ROUNDTRIP FROM:\s*(.*?)(?:CRUISE PORTS:|$)", card_text)
@@ -232,7 +174,7 @@ with sync_playwright() as p:
 
     date_scraped = datetime.now().date().isoformat()
 
-    for cruise_card in cruise_cards[:3]:
+    for cruise_card in cruise_cards:
         package_code = cruise_card["package_code"]
 
         panel_url = f"{BASE_URL}&itineraryPanel={package_code}"
@@ -240,25 +182,31 @@ with sync_playwright() as p:
 
         try:
             page.get_by_text("Available dates", exact=False).wait_for(timeout=30000)
-            available_dates = parse_available_dates(
-                page,
-                departure_date=cruise_card["departure_date"],
-            )
+            available_dates = parse_available_dates(page)
         except:
             print(f"No available dates found for: {cruise_card['itinerary_name']}")
             available_dates = []
 
         for sailing in available_dates:
+            identifier = build_sailing_identifier(
+                cruise_card["package_code"],
+                cruise_card["ship_code"],
+                sailing["sailing_date_range"],
+                cruise_card["departure_date"],
+            )
+            if identifier is None:
+                print(
+                    "Skipping sailing with an incomplete identifier: "
+                    f"{sailing['sailing_date_range']}"
+                )
+                continue
+
             cruise = {
                 "date_scraped": date_scraped,
                 "itinerary_name": cruise_card["itinerary_name"],
                 "length": cruise_card["length"],
                 "ship_name": cruise_card["ship_name"],
-                "package_code": cruise_card["package_code"],
-                "ship_code": cruise_card["ship_code"],
-                "year": sailing["year"],
-                #"card_price": cruise_card["card_price"],
-                "sailing_date_range": sailing["sailing_date_range"],
+                **identifier,
                 "price": sailing["price"],
                 "departure_port": cruise_card["departure_port"],
                 "ports": cruise_card["ports"],
@@ -279,7 +227,6 @@ fieldnames = [
     "package_code",
     "ship_code",
     "year",
-    #"card_price",
     "sailing_date_range",
     "price",
     "departure_port",

@@ -1,6 +1,5 @@
-from datetime import date
-
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine
@@ -8,6 +7,15 @@ from models import Base, Cruise, PriceHistory
 
 
 app = FastAPI(title="Cruise Price Tracker API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://www.royalcaribbean.com",
+        "https://royalcaribbean.com",
+    ],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 MINIMUM_SCRAPE_DAYS = 5
 
@@ -40,92 +48,7 @@ def get_db():
         db.close()
 
 
-@app.get("/")
-def home():
-    return {
-        "message": "Cruise API with shared database is running",
-        "database": engine.dialect.name,
-    }
-
-
-@app.post("/seed-data")
-def seed_data(db: Session = Depends(get_db)):
-    cruise = (
-        db.query(Cruise)
-        .filter_by(package_code="DEMO-WN-001", ship_code="WN", year=2027)
-        .one_or_none()
-    )
-
-    if cruise is None:
-        cruise = Cruise(
-            package_code="DEMO-WN-001",
-            ship_code="WN",
-            year=2027,
-        )
-        db.add(cruise)
-
-    cruise.ship_name = "Wonder of the Seas"
-    cruise.itinerary_name = "Demo Caribbean Cruise"
-    cruise.length = "7 nights"
-    cruise.departure_port = "Miami, Florida"
-    cruise.ports = "Nassau, Perfect Day at CocoCay"
-    db.flush()
-
-    sailing_date_range = "Jan 30 - Feb 6, 2027"
-    seeded_prices = [
-        (date(2026, 6, 1), 1200.0),
-        (date(2026, 6, 10), 1150.0),
-        (date(2026, 6, 22), 999.0),
-        (date(2026, 6, 23), 1100.0),
-        (date(2026, 6, 24), 900.0),
-    ]
-
-    for scrape_date, price in seeded_prices:
-        price_history = (
-            db.query(PriceHistory)
-            .filter_by(
-                cruise_id=cruise.id,
-                sailing_date_range=sailing_date_range,
-                year=cruise.year,
-                date_scraped=scrape_date,
-            )
-            .one_or_none()
-        )
-        if price_history is None:
-            price_history = PriceHistory(
-                cruise_id=cruise.id,
-                ship_code=cruise.ship_code,
-                sailing_date_range=sailing_date_range,
-                year=cruise.year,
-                date_scraped=scrape_date,
-                price=price,
-            )
-            db.add(price_history)
-        else:
-            price_history.price = price
-
-    db.commit()
-
-    return {
-        "message": "Demo cruise data seeded",
-        "cruise_id": cruise.id,
-        "sailing_date_range": sailing_date_range,
-        "year": cruise.year,
-        "scrape_days": len(seeded_prices),
-    }
-
-
-@app.get("/cruise-score/{cruise_id}")
-def get_cruise_score(
-    cruise_id: int,
-    sailing_date_range: str,
-    year: int,
-    db: Session = Depends(get_db),
-):
-    cruise = db.query(Cruise).filter(Cruise.id == cruise_id).one_or_none()
-    if cruise is None:
-        raise HTTPException(status_code=404, detail="Cruise not found")
-
+def build_cruise_score(cruise, sailing_date_range, year, db):
     price_rows = (
         db.query(PriceHistory)
         .filter(
@@ -146,7 +69,7 @@ def get_cruise_score(
         day_word = "day" if days_remaining == 1 else "days"
         return {
             "status": "not_enough_history",
-            "cruise_id": cruise_id,
+            "cruise_id": cruise.id,
             "year": year,
             "sailing_date_range": sailing_date_range,
             "current_price": latest_price_row.price,
@@ -169,7 +92,7 @@ def get_cruise_score(
 
     return {
         "status": "rated",
-        "cruise_id": cruise_id,
+        "cruise_id": cruise.id,
         "year": year,
         "sailing_date_range": sailing_date_range,
         "ship": cruise.ship_name,
@@ -181,3 +104,44 @@ def get_cruise_score(
         "label": label,
         "emoji": emoji,
     }
+
+
+@app.get("/")
+def home():
+    return {
+        "message": "Cruise API with shared database is running",
+        "database": engine.dialect.name,
+    }
+
+
+@app.get("/cruise-rating")
+def get_cruise_rating_by_identifiers(
+    package_code: str,
+    ship_code: str,
+    sailing_date_range: str,
+    year: int,
+    db: Session = Depends(get_db),
+):
+    cruise = (
+        db.query(Cruise)
+        .filter_by(package_code=package_code, ship_code=ship_code, year=year)
+        .one_or_none()
+    )
+    if cruise is None:
+        raise HTTPException(status_code=404, detail="Cruise not found")
+
+    return build_cruise_score(cruise, sailing_date_range, year, db)
+
+
+@app.get("/cruise-score/{cruise_id}")
+def get_cruise_score(
+    cruise_id: int,
+    sailing_date_range: str,
+    year: int,
+    db: Session = Depends(get_db),
+):
+    cruise = db.query(Cruise).filter(Cruise.id == cruise_id).one_or_none()
+    if cruise is None:
+        raise HTTPException(status_code=404, detail="Cruise not found")
+
+    return build_cruise_score(cruise, sailing_date_range, year, db)

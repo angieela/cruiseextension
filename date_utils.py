@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import date, datetime
 
 
 YEAR_PATTERN = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
@@ -27,16 +27,30 @@ def parse_starting_date(text):
     return match.group(1) if match else None
 
 
-def format_sailing_date_range(start_date, end_date):
-    """Format ISO start/end dates exactly as the extension formats a card."""
-    if not start_date or not end_date:
+def normalize_sailing_date(value):
+    """Return a deterministic ISO sailing date, or None for invalid input."""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if not isinstance(value, str):
         return None
 
     try:
-        start = datetime.strptime(start_date, "%Y-%m-%d")
-        end = datetime.strptime(end_date, "%Y-%m-%d")
-    except (TypeError, ValueError):
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
         return None
+
+
+def format_sailing_date_range(start_date, end_date):
+    """Format ISO start/end dates exactly as the extension formats a card."""
+    normalized_start = normalize_sailing_date(start_date)
+    normalized_end = normalize_sailing_date(end_date)
+    if not normalized_start or not normalized_end:
+        return None
+
+    start = date.fromisoformat(normalized_start)
+    end = date.fromisoformat(normalized_end)
 
     return f"{start:%b} {start.day} - {end:%b} {end.day}"
 

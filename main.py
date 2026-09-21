@@ -1,6 +1,7 @@
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from database import SessionLocal, engine
 from models import Base, Cruise, PriceHistory
@@ -53,8 +54,7 @@ def build_cruise_score(cruise, sailing_date_range, year, db):
         db.query(PriceHistory)
         .filter(
             PriceHistory.cruise_id == cruise.id,
-            PriceHistory.sailing_date_range == sailing_date_range,
-            PriceHistory.year == year,
+            PriceHistory.price.isnot(None),
         )
         .order_by(PriceHistory.date_scraped)
         .all()
@@ -116,15 +116,36 @@ def home():
 
 @app.get("/cruise-rating")
 def get_cruise_rating_by_identifiers(
-    package_code: str,
-    ship_code: str,
-    sailing_date_range: str,
-    year: int,
+    cruise_id: Optional[int] = None,
+    package_code: Optional[str] = None,
+    ship_code: Optional[str] = None,
+    sailing_date_range: Optional[str] = None,
+    year: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
+    if cruise_id is not None:
+        cruise = db.query(Cruise).filter(Cruise.id == cruise_id).one_or_none()
+        if cruise is None:
+            raise HTTPException(status_code=404, detail="Cruise not found")
+        return build_cruise_score(cruise, cruise.date_range, cruise.year, db)
+
+    if None in (package_code, ship_code, sailing_date_range, year):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Provide cruise_id or package_code, ship_code, "
+                "sailing_date_range, and year"
+            ),
+        )
+
     cruise = (
         db.query(Cruise)
-        .filter_by(package_code=package_code, ship_code=ship_code, year=year)
+        .filter_by(
+            package_code=package_code,
+            ship_code=ship_code,
+            year=year,
+            date_range=sailing_date_range,
+        )
         .one_or_none()
     )
     if cruise is None:

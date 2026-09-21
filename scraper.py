@@ -5,18 +5,95 @@ import csv
 import os
 
 from database import SessionLocal
-from date_utils import build_sailing_identifier, parse_starting_date
+from date_utils import (
+    build_sailing_identifier,
+    format_sailing_date_range,
+    normalize_sailing_date,
+    parse_year,
+    parse_starting_date,
+)
 from repository import save_scraped_rows
-
-all_cruises = []
 
 BASE_URL = (
     "https://www.royalcaribbean.com/cruises"
     "?country=USA&currency=USD"
-    "&destinationRegionCode_EUROP=true"
+    "&search=visiting:EU"
     "&sort=by:RECOMMENDED"
 )
+CRUISE_SEARCH_URL = "https://www.royalcaribbean.com/cruises/graph"
+CRUISE_SEARCH_FILTER = "visiting:EU"
+CRUISE_PAGE_SIZE = 50
 CSV_FILE = "royal_caribbean_cruises.csv"
+
+CRUISE_SEARCH_QUERY = """
+query CruiseSearch(
+  $filters: String
+  $sort: CruiseSearchSort
+  $pagination: CruiseSearchPagination
+) {
+  cruiseSearch(filters: $filters, sort: $sort, pagination: $pagination) {
+    results {
+      total
+      cruises {
+        id
+        masterSailing {
+          itinerary {
+            name
+            code
+            sailingNights
+            totalNights
+            departurePort {
+              name
+            }
+            ship {
+              code
+              name
+            }
+            days {
+              number
+              ports {
+                port {
+                  name
+                }
+              }
+            }
+          }
+        }
+        sailings {
+          itinerary {
+            code
+            name
+            sailingNights
+            totalNights
+            departurePort {
+              name
+            }
+            ship {
+              code
+              name
+            }
+            days {
+              number
+              ports {
+                port {
+                  name
+                }
+              }
+            }
+          }
+          startDate
+          endDate
+          stateroomClassPricing {
+            price {
+              value
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
 
 
 def clean_text(text):
@@ -115,151 +192,239 @@ def click_load_more_until_done(page):
         page.wait_for_timeout(1000)
 
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False)
-    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+def fetch_cruise_page(api, skip=0, count=CRUISE_PAGE_SIZE):
+    response = api.post(
+        CRUISE_SEARCH_URL,
+        data={
+            "operationName": "CruiseSearch",
+            "query": CRUISE_SEARCH_QUERY,
+            "variables": {
+                "filters": CRUISE_SEARCH_FILTER,
+                "sort": {"by": "RECOMMENDED"},
+                "pagination": {"count": count, "skip": skip},
+            },
+        },
+    )
 
-    page.goto(BASE_URL, wait_until="domcontentloaded")
-    page.locator('[data-testid^="cruise-card-container_"]').first.wait_for(timeout=60000)
+    if not response.ok:
+        raise RuntimeError(
+            f"Cruise search request failed with HTTP {response.status}: "
+            f"{response.text()[:500]}"
+        )
 
-    #click_load_more_until_done(page)
+    payload = response.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Cruise search returned errors: {payload['errors']}")
 
-    cards = page.locator('[data-testid^="cruise-card-container_"]')
-    card_count = cards.count()
-
-    print("Total cards found:", card_count)
-
-    cruise_cards = []
-
-    for i in range(card_count):
-        card = cards.nth(i)
-
-        card_testid = card.get_attribute("data-testid")
-        package_code = card_testid.replace("cruise-card-container_", "")
-
-        length = safe_inner_text(card.locator(f'[data-testid="cruise-duration-label-{package_code}"]'))
-        itinerary_name = safe_inner_text(card.locator(f'[data-testid="cruise-name-label-{package_code}"]'))
-        ship_name = safe_inner_text(card.locator(f'[data-testid="cruise-ship-label-{package_code}"]'))
-        card_text = card.inner_text()
-
-        #get departure port and ports
-
-        departure_port = safe_inner_text(card.locator(f'[data-testid="cruise-roundtrip-label-{package_code}"]'))
-        ports = safe_inner_text(card.locator(f'[data-testid="cruise-ports-label-{package_code}"]'))
-
-        if not departure_port:
-            departure_port = parse_departure_port_from_card_text(card_text)
-
-        if not ports:
-            ports = parse_ports_from_card_text(card_text)
-
-        #card_price_text = safe_inner_text(card.locator(f'[data-testid="cruise-price-label-{package_code}"]'))
-        #card_price = parse_price(card_price_text)
-
-        disclosure_text = safe_inner_text(card.locator(f'[data-testid="cruise-price-disclosure-label-{package_code}"]'))
-        departure_date = parse_starting_date(disclosure_text)
+    try:
+        return payload["data"]["cruiseSearch"]["results"]
+    except (KeyError, TypeError) as error:
+        raise RuntimeError("Cruise search response is missing results") from error
 
 
-        cruise_cards.append({
-            "itinerary_name": itinerary_name,
-            "length": length,
-            "ship_name": ship_name,
-            "package_code": package_code,
-            "ship_code": package_code[:2],
-            "departure_date": departure_date,
-            #"card_price": card_price,
-            "departure_port": departure_port,
-            "ports": ports,
-        })
+def fetch_all_cruises(api):
+    cruises = []
+    total = None
 
-    date_scraped = datetime.now().date().isoformat()
+    while total is None or len(cruises) < total:
+        results = fetch_cruise_page(api, skip=len(cruises))
+        page_cruises = results.get("cruises") or []
+        total = results.get("total", len(cruises) + len(page_cruises))
+        cruises.extend(page_cruises)
 
-    for cruise_card in cruise_cards:
-        package_code = cruise_card["package_code"]
+        if not page_cruises:
+            break
 
-        panel_url = f"{BASE_URL}&itineraryPanel={package_code}"
-        page.goto(panel_url, wait_until="domcontentloaded")
+    return cruises, total or len(cruises)
 
-        try:
-            page.get_by_text("Available dates", exact=False).wait_for(timeout=30000)
-            available_dates = parse_available_dates(page)
-        except:
-            print(f"No available dates found for: {cruise_card['itinerary_name']}")
-            available_dates = []
 
-        for sailing in available_dates:
-            identifier = build_sailing_identifier(
-                cruise_card["package_code"],
-                cruise_card["ship_code"],
-                sailing["sailing_date_range"],
-                cruise_card["departure_date"],
+def format_api_price(sailing):
+    prices = []
+    for stateroom in sailing.get("stateroomClassPricing") or []:
+        price = stateroom.get("price") or {}
+        value = price.get("value")
+        if isinstance(value, (int, float)) and value >= 0:
+            prices.append(value)
+
+    if not prices:
+        return None
+
+    lowest_price = min(prices)
+    if float(lowest_price).is_integer():
+        return f"${lowest_price:,.0f}"
+    return f"${lowest_price:,.2f}"
+
+
+def itinerary_ports(itinerary):
+    departure_port = (itinerary.get("departurePort") or {}).get("name")
+    ports = []
+
+    for day in itinerary.get("days") or []:
+        for visit in day.get("ports") or []:
+            port_name = (visit.get("port") or {}).get("name")
+            if (
+                port_name
+                and port_name != departure_port
+                and port_name.casefold() != "cruising"
+                and port_name not in ports
+            ):
+                ports.append(port_name)
+
+    return ", ".join(ports) or None
+
+
+def cruise_rows_from_api(cruises, date_scraped):
+    rows = []
+
+    for cruise_group in cruises:
+        master_itinerary = (
+            (cruise_group.get("masterSailing") or {}).get("itinerary") or {}
+        )
+
+        for sailing in cruise_group.get("sailings") or []:
+            sailing_itinerary = sailing.get("itinerary") or {}
+            itinerary = dict(master_itinerary)
+            itinerary.update(
+                {
+                    key: value
+                    for key, value in sailing_itinerary.items()
+                    if value is not None
+                }
             )
-            if identifier is None:
+            ship = dict(master_itinerary.get("ship") or {})
+            ship.update(
+                {
+                    key: value
+                    for key, value in (sailing_itinerary.get("ship") or {}).items()
+                    if value is not None
+                }
+            )
+            ship_code = ship.get("code")
+            nights = itinerary.get("sailingNights") or itinerary.get("totalNights")
+            length = f"{nights} Nights" if nights is not None else None
+            departure_port = (itinerary.get("departurePort") or {}).get("name")
+            ports = itinerary_ports(itinerary)
+            package_code = sailing_itinerary.get("code")
+            raw_start_date = sailing.get("startDate")
+            raw_end_date = sailing.get("endDate")
+            start_date = normalize_sailing_date(raw_start_date)
+            end_date = normalize_sailing_date(raw_end_date)
+            sailing_date_range = format_sailing_date_range(start_date, end_date)
+            identifier = build_sailing_identifier(
+                package_code,
+                ship_code,
+                sailing_date_range,
+                start_date,
+            )
+
+            if not package_code or not ship_code:
                 print(
                     "Skipping sailing with an incomplete identifier: "
-                    f"{sailing['sailing_date_range']}"
+                    f"{raw_start_date} - {raw_end_date}"
                 )
                 continue
 
-            cruise = {
-                "date_scraped": date_scraped,
-                "itinerary_name": cruise_card["itinerary_name"],
-                "length": cruise_card["length"],
-                "ship_name": cruise_card["ship_name"],
-                **identifier,
-                "price": sailing["price"],
-                "departure_port": cruise_card["departure_port"],
-                "ports": cruise_card["ports"],
+            if identifier is None:
+                identifier = {
+                    "package_code": package_code,
+                    "ship_code": ship_code,
+                    "sailing_date_range": sailing_date_range,
+                    "year": parse_year(start_date),
+                }
+
+            rows.append(
+                {
+                    "date_scraped": date_scraped,
+                    "itinerary_name": itinerary.get("name"),
+                    "length": length,
+                    "ship_name": ship.get("name"),
+                    **identifier,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "price": format_api_price(sailing),
+                    "departure_port": departure_port,
+                    "ports": ports,
+                }
+            )
+
+    return rows
+
+
+def run_scraper():
+    with sync_playwright() as p:
+        api = p.request.new_context(
+            extra_http_headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0",
             }
+        )
+        try:
+            cruise_groups, reported_total = fetch_all_cruises(api)
+        finally:
+            api.dispose()
 
-            all_cruises.append(cruise)
+    card_count = len(cruise_groups)
+    print(f"Cruise listings found: {card_count} of {reported_total}")
+    all_cruises = cruise_rows_from_api(
+        cruise_groups,
+        datetime.now().date().isoformat(),
+    )
 
-        print(f"Scraped {len(available_dates)} dates for: {cruise_card['itinerary_name']}")
+    fieldnames = [
+        "date_scraped",
+        "itinerary_name",
+        "length",
+        "ship_name",
+        "package_code",
+        "ship_code",
+        "year",
+        "start_date",
+        "end_date",
+        "sailing_date_range",
+        "price",
+        "departure_port",
+        "ports",
+    ]
 
-    browser.close()
+    file_exists = os.path.exists(CSV_FILE)
+    file_has_content = file_exists and os.path.getsize(CSV_FILE) > 0
+
+    with open(CSV_FILE, "a", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+
+        if not file_has_content:
+            writer.writeheader()
+
+        writer.writerows(all_cruises)
+
+    print(f"Appended {len(all_cruises)} rows to {CSV_FILE}")
+
+    database_summary = None
+    if all_cruises:
+        with SessionLocal() as session:
+            database_summary = save_scraped_rows(session, all_cruises)
+
+        print(f"Saved {len(all_cruises)} price-history rows to PostgreSQL")
+    else:
+        print("No scraped rows to save to PostgreSQL")
+
+    print("Total rows scraped:", len(all_cruises))
+
+    missing_prices = [row for row in all_cruises if not row["price"]]
+    missing_dates = [row for row in all_cruises if not row["sailing_date_range"]]
+    missing_names = [row for row in all_cruises if not row["itinerary_name"]]
+
+    print("Rows missing price:", len(missing_prices))
+    print("Rows missing sailing date:", len(missing_dates))
+    print("Rows missing itinerary name:", len(missing_names))
+
+    return {
+        "listings_found": card_count,
+        "rows_scraped": len(all_cruises),
+        "database": database_summary,
+    }
 
 
-fieldnames = [
-    "date_scraped",
-    "itinerary_name",
-    "length",
-    "ship_name",
-    "package_code",
-    "ship_code",
-    "year",
-    "sailing_date_range",
-    "price",
-    "departure_port",
-    "ports",
-]
-
-file_exists = os.path.exists(CSV_FILE)
-file_has_content = file_exists and os.path.getsize(CSV_FILE) > 0
-
-with open(CSV_FILE, "a", newline="", encoding="utf-8") as file:
-    writer = csv.DictWriter(file, fieldnames=fieldnames)
-
-    if not file_has_content:
-        writer.writeheader()
-
-    writer.writerows(all_cruises)
-
-print(f"Appended {len(all_cruises)} rows to {CSV_FILE}")
-
-if all_cruises:
-    with SessionLocal() as session:
-        save_scraped_rows(session, all_cruises)
-
-    print(f"Saved {len(all_cruises)} price-history rows to PostgreSQL")
-else:
-    print("No scraped rows to save to PostgreSQL")
-
-print("Total rows scraped:", len(all_cruises))
-
-missing_prices = [row for row in all_cruises if not row["price"]]
-missing_dates = [row for row in all_cruises if not row["sailing_date_range"]]
-missing_names = [row for row in all_cruises if not row["itinerary_name"]]
-
-print("Rows missing price:", len(missing_prices))
-print("Rows missing sailing date:", len(missing_dates))
-print("Rows missing itinerary name:", len(missing_names))
+if __name__ == "__main__":
+    run_scraper()

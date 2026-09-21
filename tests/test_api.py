@@ -31,6 +31,9 @@ def add_cruise(db_session):
         package_code="OV07HNL-001",
         ship_code="OV",
         year=YEAR,
+        start_date=date(2027, 9, 7),
+        end_date=date(2027, 9, 14),
+        date_range=SAILING_RANGE,
         ship_name="Ovation of the Seas",
         itinerary_name="Hawaii Cruise",
     )
@@ -45,9 +48,6 @@ def add_prices(db_session, cruise, prices, start=date(2027, 1, 1)):
             PriceHistory(
                 cruise_id=cruise.id,
                 date_scraped=start + timedelta(days=offset),
-                ship_code=cruise.ship_code,
-                sailing_date_range=SAILING_RANGE,
-                year=YEAR,
                 price=price,
             )
         )
@@ -73,8 +73,37 @@ def test_unknown_cruise_returns_404(client):
     assert response.json() == {"detail": "Cruise not found"}
 
 
+def test_cruise_rating_accepts_cruise_id(client, db_session):
+    cruise = add_cruise(db_session)
+    add_prices(db_session, cruise, [1234.56])
+
+    response = client.get("/cruise-rating", params={"cruise_id": cruise.id})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "not_enough_history",
+        "cruise_id": cruise.id,
+        "year": YEAR,
+        "sailing_date_range": SAILING_RANGE,
+        "current_price": 1234.56,
+        "days_collected": 1,
+        "days_remaining": 4,
+        "message": "Posting is too recent, come again in 4 days!",
+    }
+
+
 def test_cruise_with_no_history_returns_404(client, db_session):
     add_cruise(db_session)
+
+    response = request_rating(client)
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "No price history found"}
+
+
+def test_null_price_history_is_not_counted_as_price_history(client, db_session):
+    cruise = add_cruise(db_session)
+    add_prices(db_session, cruise, [None, None, None, None, None])
 
     response = request_rating(client)
 
@@ -151,6 +180,9 @@ def test_duplicate_rows_still_count_distinct_scrape_days(tmp_path):
                 package_code VARCHAR(100) NOT NULL,
                 ship_code VARCHAR(20) NOT NULL,
                 year INTEGER NOT NULL,
+                start_date DATE,
+                end_date DATE,
+                date_range VARCHAR(100),
                 departure_port TEXT,
                 ports TEXT,
                 created_at DATETIME,
@@ -164,11 +196,7 @@ def test_duplicate_rows_still_count_distinct_scrape_days(tmp_path):
                 id INTEGER PRIMARY KEY,
                 date_scraped DATE NOT NULL,
                 cruise_id INTEGER NOT NULL,
-                ship_code VARCHAR(20) NOT NULL,
-                sailing_date_range VARCHAR(100) NOT NULL,
-                year INTEGER NOT NULL,
-                price FLOAT NOT NULL,
-                created_at DATETIME
+                price FLOAT NOT NULL
             )
             """
         )
@@ -187,9 +215,6 @@ def test_duplicate_rows_still_count_distinct_scrape_days(tmp_path):
             PriceHistory(
                 cruise_id=cruise.id,
                 date_scraped=scrape_day,
-                ship_code=cruise.ship_code,
-                sailing_date_range=SAILING_RANGE,
-                year=YEAR,
                 price=1000,
             )
         )

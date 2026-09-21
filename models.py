@@ -22,8 +22,9 @@ class Cruise(Base):
         UniqueConstraint(
             "package_code",
             "ship_code",
-            "year",
-            name="uq_cruise_package_ship_year",
+            "start_date",
+            "end_date",
+            name="uq_sailing_package_ship_dates",
         ),
     )
 
@@ -33,7 +34,10 @@ class Cruise(Base):
     ship_name = Column(Text)
     package_code = Column(String(100), nullable=False, index=True)
     ship_code = Column(String(20), nullable=False, index=True)
-    year = Column(Integer, nullable=False, index=True)
+    year = Column(Integer, nullable=True, index=True)
+    start_date = Column(Date, nullable=True, index=True)
+    end_date = Column(Date, nullable=True, index=True)
+    date_range = Column(String(100), nullable=True, index=True)
     departure_port = Column(Text)
     ports = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -51,8 +55,6 @@ class PriceHistory(Base):
     __table_args__ = (
         UniqueConstraint(
             "cruise_id",
-            "sailing_date_range",
-            "year",
             "date_scraped",
             name="uq_sailing_price_per_day",
         ),
@@ -61,12 +63,8 @@ class PriceHistory(Base):
     id = Column(Integer, primary_key=True)
     date_scraped = Column(Date, nullable=False, index=True)
     cruise_id = Column(Integer, ForeignKey("cruises.id"), nullable=False, index=True)
-    ship_code = Column(String(20), nullable=False, index=True)
-    sailing_date_range = Column(String(100), nullable=False, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    # Changing this model does not migrate an existing database column. During
-    # development, recreate the database or apply a migration if it was String.
-    price = Column(Float, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Changing this model does not migrate an existing database column.
+    # Existing databases need a migration before they can store missing prices.
+    price = Column(Float, nullable=True)
 
     cruise = relationship("Cruise", back_populates="price_history")

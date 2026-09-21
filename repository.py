@@ -1,5 +1,6 @@
 from datetime import date
 
+from date_utils import normalize_sailing_date
 from models import Cruise, PriceHistory
 from price_utils import parse_price
 
@@ -9,6 +10,11 @@ def parse_scrape_date(value):
         return value
 
     return date.fromisoformat(value)
+
+
+def parse_sailing_date(value):
+    normalized = normalize_sailing_date(value)
+    return date.fromisoformat(normalized) if normalized else None
 
 
 def save_scraped_rows(session, rows):
@@ -22,30 +28,30 @@ def save_scraped_rows(session, rows):
     try:
         for row in rows:
             price = parse_price(row.get("price"))
-            if price is None:
-                print(
-                    "Warning: skipping price-history row with invalid price "
-                    f"{row.get('price')!r}"
-                )
-                summary["skipped"] += 1
-                continue
 
             package_code = row.get("package_code")
             ship_code = row.get("ship_code")
             sailing_date_range = row.get("sailing_date_range")
+            start_date = parse_sailing_date(row.get("start_date"))
+            end_date = parse_sailing_date(row.get("end_date"))
             try:
                 year = int(row.get("year"))
             except (TypeError, ValueError):
                 year = None
 
-            if not package_code or not ship_code or not sailing_date_range or year is None:
+            if not package_code or not ship_code:
                 print("Warning: skipping price-history row with missing identifiers")
                 summary["skipped"] += 1
                 continue
 
             cruise = (
                 session.query(Cruise)
-                .filter_by(package_code=package_code, ship_code=ship_code, year=year)
+                .filter_by(
+                    package_code=package_code,
+                    ship_code=ship_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
                 .one_or_none()
             )
 
@@ -54,6 +60,8 @@ def save_scraped_rows(session, rows):
                     package_code=package_code,
                     ship_code=ship_code,
                     year=year,
+                    start_date=start_date,
+                    end_date=end_date,
                 )
                 session.add(cruise)
                 summary["cruises_created"] += 1
@@ -61,6 +69,8 @@ def save_scraped_rows(session, rows):
             cruise.itinerary_name = row.get("itinerary_name")
             cruise.length = row.get("length")
             cruise.ship_name = row.get("ship_name")
+            cruise.year = year
+            cruise.date_range = sailing_date_range
             cruise.departure_port = row.get("departure_port")
             cruise.ports = row.get("ports")
 
@@ -70,8 +80,6 @@ def save_scraped_rows(session, rows):
                 session.query(PriceHistory)
                 .filter_by(
                     cruise_id=cruise.id,
-                    sailing_date_range=sailing_date_range,
-                    year=year,
                     date_scraped=scrape_date,
                 )
                 .one_or_none()
@@ -81,9 +89,6 @@ def save_scraped_rows(session, rows):
                 price_history = PriceHistory(
                     cruise=cruise,
                     date_scraped=scrape_date,
-                    ship_code=ship_code,
-                    sailing_date_range=sailing_date_range,
-                    year=year,
                     price=price,
                 )
                 session.add(price_history)

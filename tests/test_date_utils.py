@@ -3,9 +3,24 @@ import pytest
 from date_utils import (
     build_sailing_identifier,
     format_sailing_date_range,
+    normalize_sailing_date,
     parse_starting_date,
     parse_year,
 )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2027-09-12", "2027-09-12"),
+        ("2027-09-12", "2027-09-12"),
+        ("2027-02-29", None),
+        ("Sep 12, 2027", None),
+        (None, None),
+    ],
+)
+def test_normalize_sailing_date_is_deterministic(value, expected):
+    assert normalize_sailing_date(value) == expected
 
 
 @pytest.mark.parametrize(

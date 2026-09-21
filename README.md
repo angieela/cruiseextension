@@ -90,6 +90,27 @@ the seven-band price rating.
 Daily scheduling is deployment-specific. During local development, run the
 scraper once per day with cron, launchd, or another scheduler.
 
+## Future scheduled-job failure alerts
+
+Daily scheduling and email delivery are not implemented yet. The reusable
+integration point is `run_scraper_job()` in `scrape_job.py`. A future scheduler
+should call that function instead of calling `run_scraper()` directly and pass
+it one email notification callback:
+
+```python
+from scrape_job import run_scraper_job
+from future_email_provider import send_scrape_failure_email
+
+run_scraper_job(notify_failure=send_scrape_failure_email)
+```
+
+On success, the callback is not called. On an exception or an invalid result
+(zero listings or zero rows), it is called once with the local date/time, stage,
+error type, and error message; the original error is then re-raised so the
+scheduler also records a failed run. Configure the future email implementation
+through the `SCRAPER_ALERT_EMAIL_*` and `SMTP_*` variables documented in
+`.env.example`. Do not put credentials in source control.
+
 ## Run the tests
 
 Install the development dependencies and run pytest:

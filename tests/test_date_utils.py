@@ -24,6 +24,19 @@ def test_normalize_sailing_date_is_deterministic(value, expected):
 
 
 @pytest.mark.parametrize(
+    "value",
+    [
+        "2027-09-07",
+        "2027-09-07T00:00:00Z",
+        "2027-09-07T23:30:00-10:00",
+        "2027-09-07 12:00:00+09:00",
+    ],
+)
+def test_normalize_sailing_date_preserves_calendar_date(value):
+    assert normalize_sailing_date(value) == "2027-09-07"
+
+
+@pytest.mark.parametrize(
     ("values", "expected"),
     [
         (("2027",), 2027),

@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -11,7 +12,7 @@ from backend.date_utils import build_sailing_identifier, format_sailing_date_ran
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def content_script_identifier(card_dataset):
+def evaluate_content_script(function_name, card_dataset, timezone_name=None):
     if shutil.which("node") is None:
         pytest.skip("Node.js is required to execute the real content script")
 
@@ -20,6 +21,7 @@ const fs = require("fs");
 const vm = require("vm");
 const contentSource = fs.readFileSync(process.argv[1], "utf8");
 const dataset = JSON.parse(process.argv[2]);
+const functionName = process.argv[3];
 const sandbox = {
   console,
   URLSearchParams,
@@ -35,8 +37,8 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(contentSource, sandbox);
 const card = { dataset };
-sandbox.result = vm.runInContext("getSailingIdentifier", sandbox)(card);
-process.stdout.write(JSON.stringify(sandbox.result));
+const result = vm.runInContext(functionName, sandbox)(card);
+process.stdout.write(JSON.stringify(result));
 """
     result = subprocess.run(
         [
@@ -45,52 +47,12 @@ process.stdout.write(JSON.stringify(sandbox.result));
             script,
             str(PROJECT_ROOT / "extension" / "content.js"),
             json.dumps(card_dataset),
+            function_name,
         ],
         check=True,
         capture_output=True,
         text=True,
-    )
-    return json.loads(result.stdout)
-
-
-def content_script_embarkation_date_parts(card_dataset):
-    if shutil.which("node") is None:
-        pytest.skip("Node.js is required to execute the real content script")
-
-    script = r"""
-const fs = require("fs");
-const vm = require("vm");
-const contentSource = fs.readFileSync(process.argv[1], "utf8");
-const dataset = JSON.parse(process.argv[2]);
-const sandbox = {
-  console,
-  URLSearchParams,
-  fetch: async () => ({ status: 404, ok: false }),
-  window: { clearTimeout() {}, setTimeout() {} },
-  document: {
-    documentElement: {},
-    querySelectorAll() { return []; },
-    createElement() { return {}; },
-  },
-  MutationObserver: class { observe() {} },
-};
-vm.createContext(sandbox);
-vm.runInContext(contentSource, sandbox);
-const card = { dataset };
-const dateParts = vm.runInContext("getEmbarkationDateParts", sandbox)(card);
-process.stdout.write(JSON.stringify(dateParts));
-"""
-    result = subprocess.run(
-        [
-            "node",
-            "-e",
-            script,
-            str(PROJECT_ROOT / "extension" / "content.js"),
-            json.dumps(card_dataset),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+        env={**os.environ, **({"TZ": timezone_name} if timezone_name else {})},
     )
     return json.loads(result.stdout)
 
@@ -102,7 +64,7 @@ def test_scraper_and_content_script_build_the_same_identifier():
         "startDate": "2027-09-07",
         "endDate": "2027-09-14",
     }
-    extension_identifier = content_script_identifier(dataset)
+    extension_identifier = evaluate_content_script("getSailingIdentifier", dataset)
 
     sailing_range = format_sailing_date_range(
         dataset["startDate"], dataset["endDate"]
@@ -157,4 +119,30 @@ def test_scraper_and_content_script_build_the_same_identifier():
     ],
 )
 def test_content_script_derives_embarkation_date_parts(dataset, expected):
-    assert content_script_embarkation_date_parts(dataset) == expected
+    assert evaluate_content_script("getEmbarkationDateParts", dataset) == expected
+
+
+@pytest.mark.parametrize(
+    "timezone_name",
+    ["America/Los_Angeles", "UTC", "Asia/Seoul"],
+)
+def test_sailing_identifier_is_timezone_independent(timezone_name):
+    dataset = {
+        "packageCode": "OV07HNL-001",
+        "shipCode": "OV",
+        "startDate": "2027-09-07T23:30:00Z",
+        "endDate": "2027-09-14T23:30:00Z",
+    }
+
+    identifier = evaluate_content_script(
+        "getSailingIdentifier",
+        dataset,
+        timezone_name=timezone_name,
+    )
+
+    assert identifier == {
+        "packageCode": "OV07HNL-001",
+        "shipCode": "OV",
+        "year": 2027,
+        "sailingDateRange": "Sep 7 - Sep 14",
+    }

@@ -4,6 +4,11 @@ const DATES_CAROUSEL_SELECTOR = '[data-testid="room-view-dates-carousel"]';
 const WIDGET_ID = "cruiseka-rating-widget";
 const DATE_RANGE_PATTERN = /([A-Z][a-z]{2})\s+(\d{1,2})\s*[-–]\s*([A-Z][a-z]{2})\s+(\d{1,2})/;
 const PRICE_PATTERN = /\$\s*([\d,]+(?:\.\d{1,2})?)/;
+const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])/;
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 const EXPANDED_WIDGET_STYLE = {
   width: "158px",
   minHeight: "112px",
@@ -31,8 +36,35 @@ let syncTimer = null;
 const initializedCarousels = new WeakSet();
 const ratingCache = new Map();
 
-function formatDatePart(date) {
-  return `${date.toLocaleString("en-US", { month: "short" })} ${date.getDate()}`;
+function parseCalendarDate(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = value.trim().match(ISO_DATE_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const validationDate = new Date(Date.UTC(year, month - 1, day));
+  if (validationDate.getUTCFullYear() !== year
+      || validationDate.getUTCMonth() !== month - 1
+      || validationDate.getUTCDate() !== day) {
+    return null;
+  }
+
+  return {
+    iso: `${match[1]}-${match[2]}-${match[3]}`,
+    year,
+    month,
+    day,
+  };
+}
+
+function formatDatePart(calendarDate) {
+  return `${MONTH_NAMES[calendarDate.month - 1]} ${calendarDate.day}`;
 }
 
 function getSailingIdentifier(card) {
@@ -45,16 +77,16 @@ function getSailingIdentifier(card) {
     return null;
   }
 
-  const startDate = new Date(`${startDateText}T00:00:00`);
-  const endDate = new Date(`${endDateText}T00:00:00`);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+  const startDate = parseCalendarDate(startDateText);
+  const endDate = parseCalendarDate(endDateText);
+  if (!startDate || !endDate) {
     return null;
   }
 
   return {
     packageCode,
     shipCode,
-    year: startDate.getFullYear(),
+    year: startDate.year,
     sailingDateRange: `${formatDatePart(startDate)} - ${formatDatePart(endDate)}`,
   };
 }
@@ -89,11 +121,7 @@ function findDetailsView() {
 }
 
 function normalizeIsoDate(value) {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const match = value.match(/\d{4}-\d{2}-\d{2}/);
-  return match ? match[0] : null;
+  return parseCalendarDate(value)?.iso || null;
 }
 
 function readData(element, names) {

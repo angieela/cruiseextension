@@ -102,6 +102,20 @@ def test_cruise_rows_from_api_builds_extension_compatible_identifiers():
     ]
 
 
+def test_cruise_rows_preserve_calendar_dates_from_timestamp_values():
+    cruise_group = make_cruise_group()
+    sailing = cruise_group["sailings"][0]
+    sailing["startDate"] = "2027-09-26T23:30:00-10:00"
+    sailing["endDate"] = "2027-10-03T00:30:00+09:00"
+
+    [row] = cruise_rows_from_api([cruise_group], "2026-09-13")
+
+    assert row["start_date"] == "2027-09-26"
+    assert row["end_date"] == "2027-10-03"
+    assert row["year"] == 2027
+    assert row["sailing_date_range"] == "Sep 26 - Oct 3"
+
+
 def test_cruise_rows_from_api_uses_each_sailings_itinerary_and_ports():
     cruise_group = make_cruise_group()
     second_sailing = deepcopy(cruise_group["sailings"][0])

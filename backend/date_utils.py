@@ -3,6 +3,7 @@ from datetime import date, datetime
 
 
 YEAR_PATTERN = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
+ISO_DATE_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:$|[T ])")
 
 
 def parse_year(*values):
@@ -28,7 +29,7 @@ def parse_starting_date(text):
 
 
 def normalize_sailing_date(value):
-    """Return a deterministic ISO sailing date, or None for invalid input."""
+    """Return the source calendar date as ISO without timezone conversion."""
     if isinstance(value, datetime):
         return value.date().isoformat()
     if isinstance(value, date):
@@ -36,8 +37,12 @@ def normalize_sailing_date(value):
     if not isinstance(value, str):
         return None
 
+    match = ISO_DATE_PATTERN.match(value.strip())
+    if not match:
+        return None
+
     try:
-        return date.fromisoformat(value).isoformat()
+        return date.fromisoformat(match.group(1)).isoformat()
     except ValueError:
         return None
 

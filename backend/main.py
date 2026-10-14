@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from database import SessionLocal, engine
-from models import Base, Cruise, PriceHistory
+from backend.database import SessionLocal, engine
+from backend.models import Base, Cruise, PriceHistory
 
 
 app = FastAPI(title="Cruise Price Tracker API")

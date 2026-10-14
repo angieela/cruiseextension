@@ -3,10 +3,10 @@ from copy import deepcopy
 
 import pytest
 
-import scraper
-from models import Cruise, PriceHistory
-from repository import save_scraped_rows
-from scraper import (
+from backend import scraper
+from backend.models import Cruise, PriceHistory
+from backend.repository import save_scraped_rows
+from backend.scraper import (
     CRUISE_PAGE_SIZE,
     CRUISE_SEARCH_FILTER,
     CRUISE_SEARCH_QUERY,

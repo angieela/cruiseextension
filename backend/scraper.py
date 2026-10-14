@@ -1,18 +1,20 @@
-from playwright.sync_api import sync_playwright
-from datetime import datetime
-import re
 import csv
 import os
+import re
+from datetime import datetime
+from pathlib import Path
 
-from database import SessionLocal
-from date_utils import (
+from playwright.sync_api import sync_playwright
+
+from backend.database import SessionLocal
+from backend.date_utils import (
     build_sailing_identifier,
     format_sailing_date_range,
     normalize_sailing_date,
     parse_year,
     parse_starting_date,
 )
-from repository import save_scraped_rows
+from backend.repository import save_scraped_rows
 
 BASE_URL = (
     "https://www.royalcaribbean.com/cruises"
@@ -23,7 +25,7 @@ BASE_URL = (
 CRUISE_SEARCH_URL = "https://www.royalcaribbean.com/cruises/graph"
 CRUISE_SEARCH_FILTER = "visiting:EU"
 CRUISE_PAGE_SIZE = 50
-CSV_FILE = "royal_caribbean_cruises.csv"
+CSV_FILE = str(Path(__file__).resolve().parents[1] / "data" / "royal_caribbean_cruises.csv")
 
 CRUISE_SEARCH_QUERY = """
 query CruiseSearch(
@@ -273,6 +275,14 @@ def itinerary_ports(itinerary):
     return ", ".join(ports) or None
 
 
+def merge_non_null(base, override):
+    merged = dict(base or {})
+    for key, value in (override or {}).items():
+        if value is not None:
+            merged[key] = value
+    return merged
+
+
 def cruise_rows_from_api(cruises, date_scraped):
     rows = []
 
@@ -283,21 +293,9 @@ def cruise_rows_from_api(cruises, date_scraped):
 
         for sailing in cruise_group.get("sailings") or []:
             sailing_itinerary = sailing.get("itinerary") or {}
-            itinerary = dict(master_itinerary)
-            itinerary.update(
-                {
-                    key: value
-                    for key, value in sailing_itinerary.items()
-                    if value is not None
-                }
-            )
-            ship = dict(master_itinerary.get("ship") or {})
-            ship.update(
-                {
-                    key: value
-                    for key, value in (sailing_itinerary.get("ship") or {}).items()
-                    if value is not None
-                }
+            itinerary = merge_non_null(master_itinerary, sailing_itinerary)
+            ship = merge_non_null(
+                master_itinerary.get("ship"), sailing_itinerary.get("ship")
             )
             ship_code = ship.get("code")
             nights = itinerary.get("sailingNights") or itinerary.get("totalNights")
@@ -387,8 +385,7 @@ def run_scraper():
         "ports",
     ]
 
-    file_exists = os.path.exists(CSV_FILE)
-    file_has_content = file_exists and os.path.getsize(CSV_FILE) > 0
+    file_has_content = os.path.exists(CSV_FILE) and os.path.getsize(CSV_FILE) > 0
 
     with open(CSV_FILE, "a", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
@@ -405,19 +402,19 @@ def run_scraper():
         with SessionLocal() as session:
             database_summary = save_scraped_rows(session, all_cruises)
 
-        print(f"Saved {len(all_cruises)} price-history rows to PostgreSQL")
+        print(f"Saved {len(all_cruises)} price-history rows to SQLite")
     else:
         print("No scraped rows to save to PostgreSQL")
 
     print("Total rows scraped:", len(all_cruises))
 
-    missing_prices = [row for row in all_cruises if not row["price"]]
-    missing_dates = [row for row in all_cruises if not row["sailing_date_range"]]
-    missing_names = [row for row in all_cruises if not row["itinerary_name"]]
+    missing_prices = sum(not row["price"] for row in all_cruises)
+    missing_dates = sum(not row["sailing_date_range"] for row in all_cruises)
+    missing_names = sum(not row["itinerary_name"] for row in all_cruises)
 
-    print("Rows missing price:", len(missing_prices))
-    print("Rows missing sailing date:", len(missing_dates))
-    print("Rows missing itinerary name:", len(missing_names))
+    print("Rows missing price:", missing_prices)
+    print("Rows missing sailing date:", missing_dates)
+    print("Rows missing itinerary name:", missing_names)
 
     return {
         "listings_found": card_count,

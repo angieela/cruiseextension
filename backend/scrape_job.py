@@ -3,7 +3,7 @@ from datetime import datetime
 import sys
 from typing import Callable
 
-from scraper import run_scraper
+from backend.scraper import run_scraper
 
 
 @dataclass(frozen=True)

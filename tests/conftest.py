@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 # an in-memory database so the developer's cruises.db is never opened by tests.
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-from models import Base  # noqa: E402
+from backend.models import Base  # noqa: E402
 
 
 @pytest.fixture

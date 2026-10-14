@@ -2,8 +2,8 @@ from datetime import date
 
 import pytest
 
-from models import Cruise, PriceHistory
-from repository import save_scraped_rows
+from backend.models import Cruise, PriceHistory
+from backend.repository import save_scraped_rows
 
 
 def make_row(**overrides):

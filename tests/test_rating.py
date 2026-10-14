@@ -1,6 +1,6 @@
 import pytest
 
-from main import get_price_rating
+from backend.main import get_price_rating
 
 
 @pytest.mark.parametrize(

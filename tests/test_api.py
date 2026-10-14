@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from main import app, get_db
-from models import Cruise, PriceHistory
+from backend.main import app, get_db
+from backend.models import Cruise, PriceHistory
 
 
 SAILING_RANGE = "Sep 7 - Sep 14"

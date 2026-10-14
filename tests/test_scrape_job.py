@@ -1,6 +1,6 @@
 import pytest
 
-from scrape_job import (
+from backend.scrape_job import (
     InvalidScrapeResultError,
     ScrapeFailure,
     run_scraper_job,

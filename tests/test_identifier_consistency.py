@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from date_utils import build_sailing_identifier, format_sailing_date_range
+from backend.date_utils import build_sailing_identifier, format_sailing_date_range
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -43,7 +43,7 @@ process.stdout.write(JSON.stringify(sandbox.result));
             "node",
             "-e",
             script,
-            str(PROJECT_ROOT / "content.js"),
+            str(PROJECT_ROOT / "extension" / "content.js"),
             json.dumps(card_dataset),
         ],
         check=True,
@@ -85,7 +85,7 @@ process.stdout.write(JSON.stringify(dateParts));
             "node",
             "-e",
             script,
-            str(PROJECT_ROOT / "content.js"),
+            str(PROJECT_ROOT / "extension" / "content.js"),
             json.dumps(card_dataset),
         ],
         check=True,

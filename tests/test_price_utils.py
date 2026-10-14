@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from price_utils import parse_price
+from backend.price_utils import parse_price
 
 
 @pytest.mark.parametrize(

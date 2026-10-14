@@ -1,8 +1,8 @@
 from datetime import date
 
-from date_utils import normalize_sailing_date
-from models import Cruise, PriceHistory
-from price_utils import parse_price
+from backend.date_utils import normalize_sailing_date
+from backend.models import Cruise, PriceHistory
+from backend.price_utils import parse_price
 
 
 def parse_scrape_date(value):

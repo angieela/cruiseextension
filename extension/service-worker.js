@@ -18,6 +18,11 @@ function cruiseRatingValidationErrors(message) {
   if (!Number.isInteger(message?.year) || message.year < 1900 || message.year > 2100) {
     errors.push("year");
   }
+  if (typeof message?.current_price !== "number"
+      || !Number.isFinite(message.current_price)
+      || message.current_price < 0) {
+    errors.push("current_price");
+  }
   return errors;
 }
 
@@ -40,6 +45,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     ship_code: message.ship_code,
     sailing_date_range: message.sailing_date_range,
     year: String(message.year),
+    current_price: String(message.current_price),
   });
 
   const requestUrl = `${API_URL}?${query}`;

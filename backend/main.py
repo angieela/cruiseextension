@@ -1,7 +1,8 @@
+from typing import Optional
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import Optional
 
 from backend.database import SessionLocal, engine
 from backend.models import Base, Cruise, PriceHistory
@@ -49,7 +50,14 @@ def get_db():
         db.close()
 
 
-def build_cruise_score(cruise, sailing_date_range, year, db):
+def get_cruise_or_404(db, **filters):
+    cruise = db.query(Cruise).filter_by(**filters).one_or_none()
+    if cruise is None:
+        raise HTTPException(status_code=404, detail="Cruise not found")
+    return cruise
+
+
+def build_cruise_score(cruise, sailing_date_range, year, db, current_price=None):
     price_rows = (
         db.query(PriceHistory)
         .filter(
@@ -64,6 +72,9 @@ def build_cruise_score(cruise, sailing_date_range, year, db):
 
     distinct_scrape_days = {row.date_scraped for row in price_rows}
     latest_price_row = max(price_rows, key=lambda row: row.date_scraped)
+    displayed_current_price = (
+        current_price if current_price is not None else latest_price_row.price
+    )
     if len(distinct_scrape_days) < MINIMUM_SCRAPE_DAYS:
         days_remaining = MINIMUM_SCRAPE_DAYS - len(distinct_scrape_days)
         day_word = "day" if days_remaining == 1 else "days"
@@ -72,7 +83,7 @@ def build_cruise_score(cruise, sailing_date_range, year, db):
             "cruise_id": cruise.id,
             "year": year,
             "sailing_date_range": sailing_date_range,
-            "current_price": latest_price_row.price,
+            "current_price": displayed_current_price,
             "days_collected": len(distinct_scrape_days),
             "days_remaining": days_remaining,
             "message": (
@@ -82,12 +93,13 @@ def build_cruise_score(cruise, sailing_date_range, year, db):
         }
 
     prices = [row.price for row in price_rows]
-    current_price = latest_price_row.price
     average_price = sum(prices) / len(prices)
     if average_price <= 0:
         raise HTTPException(status_code=422, detail="Average price must be positive")
 
-    discount_percent = ((average_price - current_price) / average_price) * 100
+    discount_percent = (
+        (average_price - displayed_current_price) / average_price
+    ) * 100
     label, emoji = get_price_rating(discount_percent)
 
     return {
@@ -97,7 +109,7 @@ def build_cruise_score(cruise, sailing_date_range, year, db):
         "sailing_date_range": sailing_date_range,
         "ship": cruise.ship_name,
         "destination": cruise.itinerary_name,
-        "current_price": current_price,
+        "current_price": displayed_current_price,
         "average_price": round(average_price, 2),
         "discount_percent": round(discount_percent, 2),
         "signed_percentage": f"{discount_percent:+.2f}%",
@@ -121,12 +133,11 @@ def get_cruise_rating_by_identifiers(
     ship_code: Optional[str] = None,
     sailing_date_range: Optional[str] = None,
     year: Optional[int] = None,
+    current_price: Optional[float] = None,
     db: Session = Depends(get_db),
 ):
     if cruise_id is not None:
-        cruise = db.query(Cruise).filter(Cruise.id == cruise_id).one_or_none()
-        if cruise is None:
-            raise HTTPException(status_code=404, detail="Cruise not found")
+        cruise = get_cruise_or_404(db, id=cruise_id)
         return build_cruise_score(cruise, cruise.date_range, cruise.year, db)
 
     if None in (package_code, ship_code, sailing_date_range, year):
@@ -138,20 +149,21 @@ def get_cruise_rating_by_identifiers(
             ),
         )
 
-    cruise = (
-        db.query(Cruise)
-        .filter_by(
-            package_code=package_code,
-            ship_code=ship_code,
-            year=year,
-            date_range=sailing_date_range,
-        )
-        .one_or_none()
+    cruise = get_cruise_or_404(
+        db,
+        package_code=package_code,
+        ship_code=ship_code,
+        year=year,
+        date_range=sailing_date_range,
     )
-    if cruise is None:
-        raise HTTPException(status_code=404, detail="Cruise not found")
 
-    return build_cruise_score(cruise, sailing_date_range, year, db)
+    return build_cruise_score(
+        cruise,
+        sailing_date_range,
+        year,
+        db,
+        current_price=current_price,
+    )
 
 
 @app.get("/cruise-score/{cruise_id}")
@@ -161,8 +173,5 @@ def get_cruise_score(
     year: int,
     db: Session = Depends(get_db),
 ):
-    cruise = db.query(Cruise).filter(Cruise.id == cruise_id).one_or_none()
-    if cruise is None:
-        raise HTTPException(status_code=404, detail="Cruise not found")
-
+    cruise = get_cruise_or_404(db, id=cruise_id)
     return build_cruise_score(cruise, sailing_date_range, year, db)

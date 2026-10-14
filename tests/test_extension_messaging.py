@@ -40,6 +40,7 @@ const valid = {
   ship_code: "LE",
   sailing_date_range: "Oct 3 - Oct 10",
   year: 2027,
+  current_price: 1412,
 };
 function dispatch(message) {
   return new Promise((resolve) => listener(message, {}, resolve));
@@ -56,6 +57,7 @@ function dispatch(message) {
     ship_code: "LE",
     sailing_date_range: "Oct 3 - Oct 10",
     year: "2027",
+    current_price: "1412",
   });
 
   assert.equal((await dispatch({ ...valid, package_code: "" })).error, "Invalid cruise identifier");
@@ -110,13 +112,14 @@ vm.runInContext(`
     shipCode: "LE",
     sailingDateRange: "Oct 3 - Oct 10",
     year: 2027,
-  });
+  }, 1412);
   assert.deepEqual(JSON.parse(JSON.stringify(message)), {
     type: "GET_CRUISE_RATING",
     package_code: "LE07M870",
     ship_code: "LE",
     sailing_date_range: "Oct 3 - Oct 10",
     year: 2027,
+    current_price: 1412,
   });
   rendered = JSON.parse(JSON.stringify(sandbox.capturedRender));
   assert.equal(rendered.state, "rating");
@@ -126,7 +129,7 @@ vm.runInContext(`
     shipCode: "LE",
     sailingDateRange: "Oct 3 - Oct 10",
     year: 2027,
-  });
+  }, 1412);
   assert.equal(messageCount, 1);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """
@@ -198,6 +201,7 @@ assert.deepEqual(identifier, {
   sailingDateRange: "Oct 3 - Oct 10",
   year: 2027,
 });
+assert.equal(vm.runInContext("visiblePrice", sandbox)(tile), 1412);
 assert.equal(vm.runInContext("percentageText", sandbox)(30.25), "30.25% below average");
 assert.equal(vm.runInContext("percentageText", sandbox)(-12.5), "12.50% above average");
 """
@@ -496,8 +500,8 @@ vm.runInContext(`
 const requestRating = vm.runInContext("requestRating", sandbox);
 const base = { packageCode: "LE07M870", shipCode: "LE", year: 2027 };
 (async () => {
-  const first = requestRating({ ...base, sailingDateRange: "Sep 5 - Sep 12" });
-  const second = requestRating({ ...base, sailingDateRange: "Oct 3 - Oct 10" });
+  const first = requestRating({ ...base, sailingDateRange: "Sep 5 - Sep 12" }, 1585.92);
+  const second = requestRating({ ...base, sailingDateRange: "Oct 3 - Oct 10" }, 1510.92);
   pending["Oct 3 - Oct 10"]({ status: 200, rating: { status: "rated", current_price: 1510.92 } });
   await second;
   pending["Sep 5 - Sep 12"]({ status: 200, rating: { status: "rated", current_price: 1585.92 } });

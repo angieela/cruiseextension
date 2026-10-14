@@ -3,6 +3,7 @@ const DETAILS_PANEL_SELECTOR = '[data-testid="room-view-panel-container"]';
 const DATES_CAROUSEL_SELECTOR = '[data-testid="room-view-dates-carousel"]';
 const WIDGET_ID = "cruiseka-rating-widget";
 const DATE_RANGE_PATTERN = /([A-Z][a-z]{2})\s+(\d{1,2})\s*[-–]\s*([A-Z][a-z]{2})\s+(\d{1,2})/;
+const PRICE_PATTERN = /\$\s*([\d,]+(?:\.\d{1,2})?)/;
 const EXPANDED_WIDGET_STYLE = {
   width: "158px",
   minHeight: "112px",
@@ -167,6 +168,15 @@ function firstUrlParameter(sources, names) {
 
 function visibleDateRange(element) {
   return visibleDateRanges(element)[0] || null;
+}
+
+function visiblePrice(element) {
+  const match = element?.textContent?.match(PRICE_PATTERN);
+  if (!match) {
+    return null;
+  }
+  const price = Number(match[1].replaceAll(",", ""));
+  return Number.isFinite(price) ? price : null;
 }
 
 function visibleDateRanges(element) {
@@ -492,8 +502,8 @@ function identifierKey(identifier) {
   return [identifier.packageCode, identifier.shipCode, identifier.year, identifier.sailingDateRange].join("|");
 }
 
-async function requestRating(identifier) {
-  const key = identifierKey(identifier);
+async function requestRating(identifier, currentPrice) {
+  const key = `${identifierKey(identifier)}|${currentPrice}`;
   if (key === currentIdentifierKey) {
     return;
   }
@@ -513,6 +523,7 @@ async function requestRating(identifier) {
     ship_code: identifier.shipCode,
     sailing_date_range: identifier.sailingDateRange,
     year: identifier.year,
+    current_price: currentPrice,
   };
 
   try {
@@ -545,6 +556,7 @@ async function requestRating(identifier) {
 }
 
 function showTileRating(tile, panel = activePanel, carousel = activeCarousel) {
+  const currentPrice = visiblePrice(tile);
   const identifier = getIdentifierForTile(tile, panel, carousel);
   ensureWidget();
   if (!identifier) {
@@ -553,8 +565,14 @@ function showTileRating(tile, panel = activePanel, carousel = activeCarousel) {
     renderWidgetState("unavailable");
     return;
   }
+  if (currentPrice === null) {
+    latestRequest += 1;
+    currentIdentifierKey = null;
+    renderWidgetState("unavailable");
+    return;
+  }
   lastValidIdentifier = { ...identifier };
-  requestRating(identifier);
+  requestRating(identifier, currentPrice);
 }
 
 function initializeCarousel(panel, carousel) {

@@ -153,6 +153,30 @@ def test_five_days_returns_rating_based_on_chronologically_latest_price(
     assert body["emoji"] == "🤩"
 
 
+def test_live_current_price_is_compared_with_stored_history(client, db_session):
+    cruise = add_cruise(db_session)
+    add_prices(db_session, cruise, [1200, 1100, 1000, 900, 500])
+
+    response = client.get(
+        "/cruise-rating",
+        params={
+            "package_code": cruise.package_code,
+            "ship_code": cruise.ship_code,
+            "sailing_date_range": cruise.date_range,
+            "year": cruise.year,
+            "current_price": 800.25,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["current_price"] == 800.25
+    assert body["average_price"] == 940.0
+    assert body["discount_percent"] == 14.87
+    assert body["signed_percentage"] == "+14.87%"
+    assert body["label"] == "Good Deal"
+
+
 def test_zero_average_returns_422(client, db_session):
     cruise = add_cruise(db_session)
     add_prices(db_session, cruise, [0, 0, 0, 0, 0])

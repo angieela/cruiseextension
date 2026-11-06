@@ -1,4 +1,4 @@
-###Cruiseka — Cruise Price Tracker
+# Cruiseka — Cruise Price Tracker
 
 A full-stack cruise price tracking tool that helps travelers evaluate Royal Caribbean cruise deals using historical pricing data.
 
@@ -6,7 +6,7 @@ Cruiseka automatically collects cruise prices, stores historical observations, a
 
 Tech Stack: Python · FastAPI · SQLAlchemy · Playwright · JavaScript · Chrome Extensions · SQLite / PostgreSQL
 
-##System Architecture
+## System Architecture
 
 Cruiseka uses a data pipeline to collect cruise prices, store historical observations, and deliver price ratings through a Chrome extension.
 
@@ -106,27 +106,6 @@ the seven-band price rating.
 Daily scheduling is deployment-specific. During local development, run the
 scraper once per day with cron, launchd, or another scheduler.
 
-## Future scheduled-job failure alerts
-
-Daily scheduling and email delivery are not implemented yet. The reusable
-integration point is `run_scraper_job()` in `backend/scrape_job.py`. A future scheduler
-should call that function instead of calling `run_scraper()` directly and pass
-it one email notification callback:
-
-```python
-from backend.scrape_job import run_scraper_job
-from future_email_provider import send_scrape_failure_email
-
-run_scraper_job(notify_failure=send_scrape_failure_email)
-```
-
-On success, the callback is not called. On an exception or an invalid result
-(zero listings or zero rows), it is called once with the local date/time, stage,
-error type, and error message; the original error is then re-raised so the
-scheduler also records a failed run. Configure the future email implementation
-through the `SCRAPER_ALERT_EMAIL_*` and `SMTP_*` variables documented in
-`.env.example`. Do not put credentials in source control.
-
 ## Run the tests
 
 Install the development dependencies and run pytest:
@@ -139,3 +118,11 @@ python -m pytest -v
 The tests force application imports to use an in-memory database and create a
 separate temporary SQLite database per test, so they never read or write the
 local `data/cruises.db` file.
+
+## Future Improvements
+
+- **Automated scheduling:** Deploy a scheduled job to collect cruise prices daily.
+- **Failure notifications:** Integrate email alerts for failed or incomplete scrape runs.
+- **Expanded coverage:** Extend price tracking beyond European itineraries.
+
+The scraper already exposes a reusable `run_scraper_job()` function in `backend/scrape_job.py` to support future scheduling and error notifications.

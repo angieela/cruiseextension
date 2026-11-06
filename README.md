@@ -1,7 +1,39 @@
-# Europe Cruise Price Tracker
+Cruiseka — Cruise Price Tracker
 
-A Chrome extension, Playwright scraper, and FastAPI/SQLAlchemy backend for tracking
-Royal Caribbean Europe cruise prices over time.
+A full-stack cruise price tracking tool that helps travelers evaluate Royal Caribbean cruise deals using historical pricing data.
+
+Cruiseka automatically collects cruise prices, stores historical observations, and displays price ratings directly on Royal Caribbean's search results through a Chrome extension.
+
+Tech Stack: Python · FastAPI · SQLAlchemy · Playwright · JavaScript · Chrome Extensions · SQLite / PostgreSQL
+
+System Architecture
+
+Cruiseka uses a data pipeline to collect cruise prices, store historical observations, and deliver price ratings through a Chrome extension.
+
+```mermaid 
+flowchart TD
+    A["Royal Caribbean GraphQL API"]
+    B["Playwright Scraper"]
+    C[("SQLite / PostgreSQL Database")]
+    D["FastAPI Backend"]
+    E["Chrome Extension"]
+    F["Royal Caribbean Search Results"]
+
+    A -->|"Cruise listings & prices"| B
+    B -->|"Store historical prices"| C
+    C -->|"Retrieve pricing data"| D
+    D -->|"Return deal ratings"| E
+    E -->|"Display rating badges"| F
+
+    classDef source fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef process fill:#f3e8ff,stroke:#9333ea,color:#581c87
+    classDef storage fill:#dcfce7,stroke:#16a34a,color:#166534
+
+    class A,F source
+    class B,D,E process
+    class C storage
+```
+The scraper retrieves cruise listings from Royal Caribbean's GraphQL API. SQLAlchemy persists cruise information and daily price observations. FastAPI serves pricing evaluations to the Chrome extension, which displays ratings on matching cruise cards.
 
 ## What it does
 

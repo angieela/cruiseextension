@@ -1,4 +1,4 @@
-Cruiseka — Cruise Price Tracker
+###Cruiseka — Cruise Price Tracker
 
 A full-stack cruise price tracking tool that helps travelers evaluate Royal Caribbean cruise deals using historical pricing data.
 
@@ -6,7 +6,7 @@ Cruiseka automatically collects cruise prices, stores historical observations, a
 
 Tech Stack: Python · FastAPI · SQLAlchemy · Playwright · JavaScript · Chrome Extensions · SQLite / PostgreSQL
 
-System Architecture
+##System Architecture
 
 Cruiseka uses a data pipeline to collect cruise prices, store historical observations, and deliver price ratings through a Chrome extension.
 
